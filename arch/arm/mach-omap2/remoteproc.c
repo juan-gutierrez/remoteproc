@@ -26,13 +26,16 @@
 #include <plat/remoteproc.h>
 #include <plat/iommu.h>
 
+#define OMAP4430_CONTROL_DSP_BOOTADDR (0x4A002304)
+
 /*
  * Temporarily define the CMA base address explicitly.
  *
  * This will go away as soon as we have the IOMMU-based generic
  * DMA API in place.
  */
-#define OMAP_RPROC_CMA_BASE	(0xa9000000)
+#define OMAP_RPROC_CMA_BASE_IPU	(0xa9000000)
+#define OMAP_RPROC_CMA_BASE_DSP	(0xa8800000)
 
 /*
  * These data structures define platform-specific information
@@ -49,10 +52,18 @@ static struct omap_rproc_pdata omap4_rproc_data[] = {
 		.mbox_name	= "mailbox-1",
 		.oh_name	= "ipu_c0",
 	},
+	{
+		.name		= "dsp_c0",
+		.firmware	= "tesla-dsp.xe64T",
+		.mbox_name	= "mailbox-2",
+		.oh_name	= "dsp_c0",
+		.boot_reg	= OMAP4430_CONTROL_DSP_BOOTADDR,
+	},
 };
 
 static struct omap_iommu_arch_data omap4_rproc_iommu[] = {
 	{ .name = "ducati" },
+	{ .name = "tesla" },
 };
 
 static struct omap_device_pm_latency omap_rproc_latency[] = {
@@ -65,23 +76,34 @@ static struct omap_device_pm_latency omap_rproc_latency[] = {
 
 static struct platform_device omap4_ducati = {
 	.name	= "omap-rproc",
-	.id	= 1, /* reserve 0 for tesla. we respect. */
+	.id	= 1,
+};
+
+static struct platform_device omap4_tesla = {
+	.name	= "omap-rproc",
+	.id	= 0,
 };
 
 static struct platform_device *omap4_rproc_devs[] __initdata = {
 	&omap4_ducati,
+	&omap4_tesla,
 };
 
 void __init omap_rproc_reserve_cma(void)
 {
 	int ret;
-
 	/* reserve CMA memory for OMAP4's M3 "ducati" remote processor */
 	ret = dma_declare_contiguous(&omap4_ducati.dev,
 					CONFIG_OMAP_DUCATI_CMA_SIZE,
-					OMAP_RPROC_CMA_BASE, 0);
+					OMAP_RPROC_CMA_BASE_IPU, 0);
 	if (ret)
-		pr_err("dma_declare_contiguous failed %d\n", ret);
+		pr_err("dma_declare_contiguous failed for ipu %d\n", ret);
+	/* reserve CMA memory for OMAP4's dsp "tesla" remote processor */
+	ret = dma_declare_contiguous(&omap4_tesla.dev,
+					CONFIG_OMAP_TESLA_CMA_SIZE,
+					OMAP_RPROC_CMA_BASE_DSP , 0);
+	if (ret)
+		pr_err("dma_declare_contiguous failed for dsp %d\n", ret);
 }
 
 static int __init omap_rproc_init(void)
