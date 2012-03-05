@@ -112,7 +112,19 @@ static int omap_rproc_start(struct rproc *rproc)
 	struct omap_rproc *oproc = rproc->priv;
 	struct platform_device *pdev = to_platform_device(rproc->dev);
 	struct omap_rproc_pdata *pdata = pdev->dev.platform_data;
+	void __iomem *boot_reg;
 	int ret;
+
+	/* load remote processor boot address if needed.
+	 * This should be revisited to only io-remapping once
+	 *and moved the writel to the activate function */
+	if (pdata->boot_reg) {
+		boot_reg = ioremap(pdata->boot_reg, sizeof(u32));
+		if (!boot_reg)
+			return -EIO;
+		writel(rproc->bootaddr, boot_reg);
+		iounmap(boot_reg);
+	}
 
 	oproc->nb.notifier_call = omap_rproc_mbox_callback;
 
