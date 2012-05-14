@@ -171,17 +171,11 @@ static void *rproc_da_to_va(struct rproc *rproc, u64 da, int len)
 	void *ptr = NULL;
 
 	list_for_each_entry(carveout, &rproc->carveouts, node) {
-		int offset = da - carveout->da;
-
-		/* try next carveout if da is too small */
-		if (offset < 0)
+		/* try next carveout if da is not included */
+		if (da < carveout->da || da >= (carveout->da + carveout->len))
 			continue;
 
-		/* try next carveout if da is too large */
-		if (offset + len > carveout->len)
-			continue;
-
-		ptr = carveout->va + offset;
+		ptr = carveout->va + (da - carveout->da);
 
 		break;
 	}
