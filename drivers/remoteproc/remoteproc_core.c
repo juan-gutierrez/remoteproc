@@ -171,8 +171,9 @@ static void *rproc_da_to_va(struct rproc *rproc, u64 da, int len)
 	void *ptr = NULL;
 
 	list_for_each_entry(carveout, &rproc->carveouts, node) {
+printk("rproc_da_to_va: da 0x%x carveout: da 0x%x va 0x%x len 0x%x\n", (u32)da, carveout->da, (u32)carveout->va, carveout->len);
 		/* try next carveout if da is not included */
-		if (da < carveout->da || da >= (carveout->da + carveout->len))
+		if (da < (u64)carveout->da || da >= (u64)(carveout->da + carveout->len))
 			continue;
 
 		ptr = carveout->va + (da - carveout->da);
@@ -266,8 +267,10 @@ rproc_load_segments(struct rproc *rproc, const u8 *elf_data, size_t len)
 		 * did this for us. albeit harmless, we may consider removing
 		 * this.
 		 */
-		if (memsz > filesz)
-			memset(ptr + filesz, 0, memsz - filesz);
+
+		/* removing this to prevent overwrite of shared page */
+/*		if (memsz > filesz)
+			memset(ptr + filesz, 0, memsz - filesz); */
 	}
 
 	return ret;
@@ -472,6 +475,8 @@ static int rproc_handle_trace(struct rproc *rproc, struct fw_rsc_trace *rsc,
 		dev_err(rproc->dev, "trace rsc is truncated\n");
 		return -EINVAL;
 	}
+
+printk("trace resource; da 0x%x len 0x%x name %s\n", rsc->da, rsc->len, rsc->name);
 
 	/* make sure reserved bytes are zeroes */
 	if (rsc->reserved) {
@@ -731,6 +736,65 @@ free_mapping:
 	return ret;
 }
 
+
+/* Add a fake carveout to allow rproc_da_to_va to work for tesla-ducati shared memory */
+static int rproc_add_shared_mem(struct rproc *rproc,
+				u32 da, u32 pa, u32 size)
+{
+	struct rproc_mem_entry *carveout;
+	struct device *dev = rproc->dev;
+	void *va;
+	int ret;
+
+	carveout = kzalloc(sizeof(*carveout), GFP_KERNEL);
+	if (!carveout) {
+		dev_err(dev, "kzalloc carveout failed\n");
+		return -ENOMEM;
+	}
+
+	va = ioremap(pa, size);
+	if (!va) {
+		dev_err(dev, "failed to ioremap shared memory\n");
+		ret = -ENOMEM;
+		goto free_carv;
+	}
+
+	printk("shared memory faux carveout va %p, da %x, addr %x, size 0x%x\n", va, da, pa, size);
+
+	carveout->va = va;
+	carveout->len = size;
+	carveout->dma = pa;
+	carveout->da = da;
+
+	list_add_tail(&carveout->node, &rproc->carveouts);
+
+	return 0;
+
+free_carv:
+	kfree(carveout);
+	return ret;
+}
+
+
+/* clean up the fake carveout */
+static int rproc_cleanup_shared_mem(struct rproc *rproc)
+{
+	struct rproc_mem_entry *carveout;
+
+	carveout = list_first_entry(&rproc->carveouts, struct rproc_mem_entry, node);
+
+	iounmap(carveout->va);
+
+	printk("cleaned up shared memory faux carveout va %p, addr %x, size 0x%x\n",
+	       carveout->va, carveout->da, carveout->len);
+
+	list_del(&carveout->node);
+
+
+	return 0;
+}
+
+
 /*
  * A lookup table for resource handlers. The indices are defined in
  * enum fw_resource_type.
@@ -749,6 +813,9 @@ rproc_handle_boot_rsc(struct rproc *rproc, struct resource_table *table, int len
 	struct device *dev = rproc->dev;
 	rproc_handle_resource_t handler;
 	int ret = 0, i;
+
+	/* these addresses must match those it the resource table */
+	rproc_add_shared_mem(rproc, 0xa0100000, 0xa8600000, SZ_1M);
 
 	for (i = 0; i < table->num; i++) {
 		int offset = table->offset[i];
@@ -914,7 +981,10 @@ static void rproc_resource_cleanup(struct rproc *rproc)
 		kfree(entry);
 	}
 
+
 	/* clean up carveout allocations */
+	rproc_cleanup_shared_mem(rproc);
+
 	list_for_each_entry_safe(entry, tmp, &rproc->carveouts, node) {
 		dma_free_coherent(dev, entry->len, entry->va, entry->dma);
 		list_del(&entry->node);

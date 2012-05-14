@@ -15,6 +15,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
+#include <linux/memblock.h>
 
 #include <plat/common.h>
 #include <plat/board.h>
@@ -64,11 +65,19 @@ const void *__init omap_get_var_config(u16 tag, size_t *len)
 
 void __init omap_reserve(void)
 {
+	phys_addr_t paddr;
+	phys_addr_t size = SZ_1M;
+
 	omap_vram_reserve_sdram_memblock();
 	omap_dsp_reserve_sdram_memblock();
 	omap_rproc_reserve_cma();
 	omap_secure_ram_reserve_memblock();
 	omap_barrier_reserve_memblock();
+
+	paddr = memblock_alloc(size, SZ_1M);
+    printk("SYSBIOS shared memory paddr = 0x%x", paddr);
+	memblock_free(paddr, size);
+	memblock_remove(paddr, size);
 }
 
 void __init omap_init_consistent_dma_size(void)
